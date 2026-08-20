@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 
 RETURN_YEARS = ["FY2021", "FY2022", "FY2023", "FY2024", "FY2025"]
 
@@ -64,7 +64,7 @@ def ask_groq(question: str, context_csv: str, history: list[dict]) -> str:
         model=GROQ_MODEL,
         messages=messages,
         temperature=0.3,
-        max_tokens=600,
+        max_tokens=800,
     )
     return completion.choices[0].message.content
 

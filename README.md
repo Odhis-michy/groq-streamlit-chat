@@ -34,7 +34,7 @@ natural-language questions about the data.
 
    ```
    GROQ_API_KEY=your-key-here
-   GROQ_MODEL=llama-3.3-70b-versatile
+   GROQ_MODEL=openai/gpt-oss-120b
    ```
 
    The app runs fine without a key — the data table/filters/chart all work; only the AI chat
