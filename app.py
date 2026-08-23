@@ -1,6 +1,19 @@
-"""Kenya Investment Explorer — browse sample NSE stake prices & returns, ask Groq AI about them."""
+"""Kenya Investment Explorer.
 
+A single Streamlit app covering:
+- Companies across all major sectors of the Kenyan economy, their share returns,
+  and current market price per share (editable — prices can be updated any time
+  they change, and the update is persisted to data/companies.json).
+- An "Asset Classes Explained" education section.
+- A Groq-powered AI chat assistant that answers questions using the live dataset.
+
+All figures are illustrative/sample data for a demo app, not live market data.
+"""
+
+import json
 import os
+from datetime import date
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -11,38 +24,63 @@ load_dotenv()
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 
-RETURN_YEARS = ["FY2021", "FY2022", "FY2023", "FY2024", "FY2025"]
+DATA_PATH = Path(__file__).parent / "data" / "companies.json"
 
-SAMPLE_DATA = [
-    # Company, Sector, Stake Price (KES/share), Market Cap (KES Bn), FY2021..FY2025 return %
-    ("Safaricom PLC", "Telecommunications", 17.50, 700.0, 12.4, -8.1, 5.6, 18.9, 22.3),
-    ("Equity Group Holdings", "Banking", 45.20, 171.0, 22.1, 9.8, -3.4, 14.7, 19.5),
-    ("KCB Group", "Banking", 38.75, 124.0, 15.6, -5.2, 8.9, 21.3, 17.8),
-    ("East African Breweries (EABL)", "Consumer Goods", 165.00, 130.0, 8.3, 4.1, -6.7, 11.2, 9.4),
-    ("British American Tobacco Kenya", "Consumer Goods", 340.00, 34.0, 6.5, 2.3, 7.8, -4.5, 10.1),
-    ("Co-operative Bank of Kenya", "Banking", 13.85, 81.0, 18.9, 6.4, 1.2, 16.5, 13.7),
-    ("Absa Bank Kenya", "Banking", 15.60, 95.0, 20.3, 11.7, -2.1, 13.4, 16.2),
-    ("Bamburi Cement (Portland)", "Manufacturing", 55.00, 21.0, -4.2, -12.5, 9.6, 24.8, 15.3),
-    ("Kenya Airways (KQ)", "Aviation", 3.85, 22.0, -25.4, -18.6, -9.3, 12.1, 8.7),
-    ("Britam Holdings", "Insurance", 6.40, 24.0, 9.7, 3.5, -1.8, 15.9, 12.6),
-    ("Jubilee Holdings", "Insurance", 210.00, 18.0, 7.2, 5.9, 4.3, 10.6, 11.8),
-    ("Stanbic Holdings", "Banking", 132.00, 51.0, 16.4, 8.2, 2.7, 18.3, 14.9),
-    ("KenGen", "Energy", 3.10, 52.0, 5.8, -3.9, 11.4, 20.7, 16.5),
-    ("Nation Media Group", "Media", 20.50, 3.5, -6.1, -10.2, 2.4, 7.8, 6.3),
-]
+PRICE_COL = "Market Price (KES/share)"
+PREV_PRICE_COL = "Previous Price (KES/share)"
+UPDATED_COL = "Price Last Updated"
 
-COLUMNS = ["Company", "Sector", "Stake Price (KES/share)", "Market Cap (KES Bn)", *RETURN_YEARS]
+
+def load_raw() -> dict:
+    return json.loads(DATA_PATH.read_text())
 
 
 @st.cache_data
-def load_data() -> pd.DataFrame:
-    df = pd.DataFrame(SAMPLE_DATA, columns=COLUMNS)
-    df["Avg Return %"] = df[RETURN_YEARS].mean(axis=1).round(2)
+def load_data(_version: int = 0) -> pd.DataFrame:
+    """`_version` is bumped after a save so st.cache_data invalidates."""
+    raw = load_raw()
+    rows = []
+    for c in raw["companies"]:
+        row = {
+            "Company": c["company"],
+            "Sector": c["sector"],
+            PRICE_COL: c["marketPrice"],
+            PREV_PRICE_COL: c.get("previousPrice"),
+            UPDATED_COL: c.get("lastUpdated", raw.get("lastPriceUpdate", "")),
+            "Market Cap (KES Bn)": c["marketCap"],
+            **c["returns"],
+        }
+        rows.append(row)
+    df = pd.DataFrame(rows)
+    df["Avg Return %"] = df[raw["returnYears"]].mean(axis=1).round(2)
     return df
 
 
+def save_price_updates(edited_df: pd.DataFrame) -> bool:
+    """Persist edited market prices back to data/companies.json."""
+    raw = load_raw()
+    today = date.today().isoformat()
+    edited_by_name = edited_df.set_index("Company")
+
+    changed = False
+    for c in raw["companies"]:
+        new_price = float(edited_by_name.loc[c["company"], PRICE_COL])
+        old_price = float(c["marketPrice"])
+        if new_price != old_price:
+            c["previousPrice"] = old_price
+            c["marketPrice"] = new_price
+            c["lastUpdated"] = today
+            changed = True
+
+    if changed:
+        raw["lastPriceUpdate"] = today
+        DATA_PATH.write_text(json.dumps(raw, indent=2))
+    return changed
+
+
 def build_ai_context(df: pd.DataFrame) -> str:
-    return df.to_csv(index=False)
+    cols = ["Company", "Sector", PRICE_COL, "Market Cap (KES Bn)", "Avg Return %"]
+    return df[cols].to_csv(index=False)
 
 
 def ask_groq(question: str, context_csv: str, history: list[dict]) -> str:
@@ -50,9 +88,12 @@ def ask_groq(question: str, context_csv: str, history: list[dict]) -> str:
 
     client = Groq(api_key=GROQ_API_KEY)
     system_prompt = (
-        "You are an investment research assistant focused on the Kenyan market (NSE). "
-        "Answer questions using ONLY the sample dataset (CSV) provided below as context. "
-        "The data is illustrative/sample data for a demo app, not live market data — "
+        "You are an investment research assistant focused on the Kenyan market (NSE) "
+        "and covers all sectors of the Kenyan economy. Answer questions using ONLY the "
+        "sample dataset (CSV) provided below as context, plus general knowledge about how "
+        "asset classes (equities, bonds, money market funds, REITs, unit trusts, etc.) work "
+        "when the user asks conceptual questions. "
+        "The company data is illustrative/sample data for a demo app, not live market data — "
         "if the user seems to want financial advice, remind them this is not financial advice "
         "and figures are illustrative.\n\nDataset (CSV):\n" + context_csv
     )
@@ -69,45 +110,223 @@ def ask_groq(question: str, context_csv: str, history: list[dict]) -> str:
     return completion.choices[0].message.content
 
 
-def main() -> None:
-    st.set_page_config(page_title="Kenya Investment Explorer", page_icon="📈", layout="wide")
-    st.title("📈 Kenya Investment Explorer")
-    st.caption("Browse sample stake prices and returns for NSE-listed Kenyan companies, and ask Groq AI about them.")
-    st.warning(
-        "⚠️ **Sample/illustrative data only** — figures below are placeholder demo data, "
-        "not live market data, and nothing on this page is financial advice.",
-        icon="⚠️",
+ASSET_CLASSES = [
+    {
+        "name": "Equities (Shares/Stocks)",
+        "icon": "📈",
+        "how": (
+            "You buy a small ownership stake (a share) in a listed company, such as the "
+            "companies on the Nairobi Securities Exchange (NSE) in the **Companies & Sectors** "
+            "tab. Returns come from two places: **capital gains** (the market price per share "
+            "rising) and **dividends** (a portion of profits paid out to shareholders). Value "
+            "moves with company performance and market sentiment, so returns can be volatile "
+            "year to year — as seen in the FY return columns in this app."
+        ),
+    },
+    {
+        "name": "Government Bonds & Treasury Bills",
+        "icon": "🏛️",
+        "how": (
+            "You lend money to the Kenyan government via the Central Bank of Kenya (CBK). "
+            "Treasury Bills (T-Bills) are short-term (91/182/364 days) and sold at a discount; "
+            "Treasury Bonds run longer (2–30 years) and pay a fixed coupon (interest) every six "
+            "months. Considered one of the lowest-risk assets in Kenya since they're backed by "
+            "the government, returns are fixed and predictable."
+        ),
+    },
+    {
+        "name": "Corporate Bonds",
+        "icon": "🏢",
+        "how": (
+            "Similar to government bonds, but you lend to a company instead of the state. "
+            "Corporate bonds typically pay a higher coupon than government bonds to compensate "
+            "for the extra risk that the company could default on payments."
+        ),
+    },
+    {
+        "name": "Money Market Funds (MMFs)",
+        "icon": "💰",
+        "how": (
+            "A pooled fund (e.g. from a licensed fund manager) that invests in short-term, "
+            "low-risk instruments like T-Bills, commercial paper, and bank deposits. You buy "
+            "units and earn a variable daily interest rate. Highly liquid — withdrawals are "
+            "usually available within a day or two — making it popular for emergency savings."
+        ),
+    },
+    {
+        "name": "Unit Trusts / Collective Investment Schemes (CIS)",
+        "icon": "🧺",
+        "how": (
+            "A professionally managed fund that pools money from many investors to buy a "
+            "diversified basket of assets (equities, bonds, or a balanced mix). You buy units "
+            "whose price (NAV) moves with the value of the underlying portfolio. Lets small "
+            "investors get diversification and professional management without picking "
+            "individual stocks themselves."
+        ),
+    },
+    {
+        "name": "Real Estate Investment Trusts (REITs)",
+        "icon": "🏗️",
+        "how": (
+            "A REIT owns and manages income-generating property (offices, malls, residential "
+            "developments) and is listed on the exchange, like ILAM Fahari I-REIT in this app. "
+            "You buy shares in the REIT rather than a physical building, and earn a share of "
+            "rental income and any appreciation in property value — real estate exposure "
+            "without needing the capital to buy property outright."
+        ),
+    },
+    {
+        "name": "Direct Real Estate",
+        "icon": "🏠",
+        "how": (
+            "Buying physical land or property directly. Returns come from rental income and "
+            "capital appreciation when the property is sold. Requires significant upfront "
+            "capital, is illiquid (can take months to sell), but is a well-established store "
+            "of value in Kenya."
+        ),
+    },
+    {
+        "name": "Fixed/Term Deposits",
+        "icon": "🏦",
+        "how": (
+            "You deposit a lump sum with a bank for a fixed period (e.g. 3–12 months) at an "
+            "agreed interest rate, and withdraw the principal plus interest at maturity. Low "
+            "risk and simple, but usually lower returns than market-based instruments, with a "
+            "penalty for early withdrawal."
+        ),
+    },
+    {
+        "name": "SACCOs (Savings & Credit Co-operatives)",
+        "icon": "🤝",
+        "how": (
+            "A member-owned co-operative where members save together and can borrow against "
+            "their savings. Returns come as annual dividends on shares and interest on "
+            "deposits, set by the SACCO's board based on yearly performance."
+        ),
+    },
+    {
+        "name": "Pension Funds (e.g. NSSF, occupational schemes)",
+        "icon": "👴",
+        "how": (
+            "Long-term retirement savings, often with employer and employee contributions, "
+            "invested by professional fund managers across equities, bonds, and property. "
+            "Grows tax-efficiently over an entire career and is paid out (or drawn down) at "
+            "retirement."
+        ),
+    },
+    {
+        "name": "Commodities",
+        "icon": "🌾",
+        "how": (
+            "Investing in physical goods such as gold, or agricultural produce, either "
+            "directly or via a fund/derivative tracking their price. Prices are driven by "
+            "global supply and demand, and commodities often move independently of stocks and "
+            "bonds — useful for diversification."
+        ),
+    },
+    {
+        "name": "Derivatives (Futures/Options)",
+        "icon": "📐",
+        "how": (
+            "Contracts whose value is derived from an underlying asset (a stock, index, or "
+            "commodity), used to hedge risk or speculate on price moves. The NSE's derivatives "
+            "market (NEXT) offers equity futures. Can amplify both gains and losses, so it's "
+            "considered higher-risk and typically used by more experienced investors."
+        ),
+    },
+]
+
+
+def hide_default_chrome() -> None:
+    st.markdown(
+        "<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;}</style>",
+        unsafe_allow_html=True,
     )
 
-    df = load_data()
 
+def render_overview(df: pd.DataFrame, raw: dict) -> None:
+    st.subheader("Market snapshot")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Companies tracked", len(df))
+    c2.metric("Sectors covered", df["Sector"].nunique())
+    c3.metric("Total market cap (KES Bn)", f"{df['Market Cap (KES Bn)'].sum():,.1f}")
+    c4.metric("Prices last updated", raw.get("lastPriceUpdate", "—"))
+
+    st.subheader("Companies per sector")
+    sector_counts = df.groupby("Sector").size().sort_values(ascending=False)
+    st.bar_chart(sector_counts)
+
+    st.subheader("Average return by sector")
+    sector_returns = df.groupby("Sector")["Avg Return %"].mean().sort_values(ascending=False).round(2)
+    st.bar_chart(sector_returns)
+
+
+def render_companies(df: pd.DataFrame) -> pd.DataFrame:
     st.sidebar.header("Filters")
     sectors = sorted(df["Sector"].unique())
     selected_sectors = st.sidebar.multiselect("Sector", sectors, default=sectors)
 
-    max_price = float(df["Stake Price (KES/share)"].max())
-    price_cap = st.sidebar.slider(
-        "Max stake price (KES/share)", 0.0, max_price, max_price, step=1.0
-    )
+    max_price = float(df[PRICE_COL].max())
+    price_cap = st.sidebar.slider("Max market price (KES/share)", 0.0, max_price, max_price, step=1.0)
 
-    min_avg_return = st.sidebar.slider(
-        "Min average return (%)", -30.0, 30.0, -30.0, step=0.5
-    )
+    min_avg_return = st.sidebar.slider("Min average return (%)", -30.0, 30.0, -30.0, step=0.5)
 
     filtered = df[
         df["Sector"].isin(selected_sectors)
-        & (df["Stake Price (KES/share)"] <= price_cap)
+        & (df[PRICE_COL] <= price_cap)
         & (df["Avg Return %"] >= min_avg_return)
     ]
 
     st.subheader(f"Investment opportunities ({len(filtered)} companies)")
-    st.dataframe(filtered.set_index("Company"), use_container_width=True)
+    display_cols = ["Sector", PRICE_COL, "Market Cap (KES Bn)", "Avg Return %", UPDATED_COL]
+    st.dataframe(filtered.set_index("Company")[display_cols], use_container_width=True)
 
     if not filtered.empty:
         st.subheader("Average return by company")
         st.bar_chart(filtered.set_index("Company")["Avg Return %"])
 
-    st.divider()
+    return filtered
+
+
+def render_price_updates(df: pd.DataFrame) -> None:
+    st.subheader("💹 Update current market price per share")
+    st.caption(
+        "Edit the **Market Price (KES/share)** column below to reflect a new price, then click "
+        "**Save price updates**. Changes are written to `data/companies.json` and the previous "
+        "price + update date are recorded automatically."
+    )
+
+    editable_cols = ["Company", "Sector", PRICE_COL, PREV_PRICE_COL, UPDATED_COL]
+    edited = st.data_editor(
+        df[editable_cols],
+        use_container_width=True,
+        hide_index=True,
+        disabled=["Company", "Sector", PREV_PRICE_COL, UPDATED_COL],
+        column_config={
+            PRICE_COL: st.column_config.NumberColumn(PRICE_COL, min_value=0.0, step=0.05, format="%.2f"),
+        },
+        key="price_editor",
+    )
+
+    if st.button("💾 Save price updates", type="primary"):
+        changed = save_price_updates(edited)
+        if changed:
+            st.session_state["data_version"] = st.session_state.get("data_version", 0) + 1
+            st.success("Prices updated and saved.")
+            st.rerun()
+        else:
+            st.info("No price changes detected.")
+
+
+def render_asset_classes() -> None:
+    st.subheader("🎓 Asset classes explained")
+    st.caption("A quick primer on the main asset classes available to investors in Kenya, and how each one works.")
+    for a in ASSET_CLASSES:
+        with st.expander(f"{a['icon']} {a['name']}"):
+            st.markdown(a["how"])
+
+
+def render_chat(df: pd.DataFrame) -> None:
     st.subheader("🤖 Ask Groq AI about these opportunities")
 
     if "chat_history" not in st.session_state:
@@ -119,29 +338,64 @@ def main() -> None:
             "The rest of the app works without it.",
             icon="🔑",
         )
-    else:
-        for msg in st.session_state.chat_history:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+        return
 
-        question = st.chat_input("e.g. Which sectors had the best average returns?")
-        if question:
-            st.session_state.chat_history.append({"role": "user", "content": question})
-            with st.chat_message("user"):
-                st.markdown(question)
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-            with st.chat_message("assistant"):
-                try:
-                    answer = ask_groq(
-                        question,
-                        build_ai_context(filtered if not filtered.empty else df),
-                        st.session_state.chat_history[:-1],
-                    )
-                except Exception as exc:  # noqa: BLE001 - surface any API/config error to the user
-                    answer = f"Sorry, the AI assistant hit an error: `{exc}`"
-                st.markdown(answer)
+    question = st.chat_input("e.g. Which sectors had the best average returns?")
+    if question:
+        st.session_state.chat_history.append({"role": "user", "content": question})
+        with st.chat_message("user"):
+            st.markdown(question)
 
-            st.session_state.chat_history.append({"role": "assistant", "content": answer})
+        with st.chat_message("assistant"):
+            try:
+                answer = ask_groq(question, build_ai_context(df), st.session_state.chat_history[:-1])
+            except Exception as exc:  # noqa: BLE001 - surface any API/config error to the user
+                answer = f"Sorry, the AI assistant hit an error: `{exc}`"
+            st.markdown(answer)
+
+        st.session_state.chat_history.append({"role": "assistant", "content": answer})
+
+
+def main() -> None:
+    st.set_page_config(page_title="Kenya Investment Explorer", page_icon="📈", layout="wide")
+    hide_default_chrome()
+    st.title("📈 Kenya Investment Explorer")
+    st.caption(
+        "Browse companies across every major sector of the Kenyan economy, their share "
+        "returns, and current market price per share — with an AI assistant to ask about it."
+    )
+    st.warning(
+        "⚠️ **Sample/illustrative data only** — figures below are placeholder demo data, "
+        "not live market data, and nothing on this page is financial advice.",
+        icon="⚠️",
+    )
+
+    version = st.session_state.get("data_version", 0)
+    df = load_data(version)
+    raw = load_raw()
+
+    tab_overview, tab_companies, tab_prices, tab_assets, tab_chat = st.tabs(
+        ["🏠 Overview", "📊 Companies & Sectors", "💹 Update Market Prices", "🎓 Asset Classes", "🤖 Ask AI"]
+    )
+
+    with tab_overview:
+        render_overview(df, raw)
+
+    with tab_companies:
+        filtered = render_companies(df)
+
+    with tab_prices:
+        render_price_updates(df)
+
+    with tab_assets:
+        render_asset_classes()
+
+    with tab_chat:
+        render_chat(filtered if not filtered.empty else df)
 
 
 if __name__ == "__main__":
