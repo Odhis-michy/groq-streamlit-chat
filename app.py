@@ -288,6 +288,40 @@ def render_companies(df: pd.DataFrame) -> pd.DataFrame:
     return filtered
 
 
+def render_live_refresh(raw: dict) -> None:
+    st.subheader("🔄 Live NSE prices")
+    last_fetch = raw.get("lastFetch")
+
+    if last_fetch is None:
+        st.caption("No live refresh has been run yet. Prices below are the last manually-set values.")
+    elif last_fetch["status"] == "ok":
+        st.success(
+            f"Last live refresh: **{last_fetch['attemptedAt']}** — "
+            f"updated {last_fetch['updatedCount']} price(s) from {last_fetch['source']}.",
+            icon="✅",
+        )
+        if last_fetch.get("skipped"):
+            st.caption("Not on live source (kept last known price): " + ", ".join(last_fetch["skipped"]))
+    else:
+        st.warning(
+            f"Last live refresh attempt **failed** at {last_fetch['attemptedAt']} "
+            f"({last_fetch['error']}) — showing last known prices.",
+            icon="⚠️",
+        )
+
+    if st.button("🔄 Refresh live prices now", type="primary"):
+        from data.fetch_prices import update_companies_json
+
+        with st.spinner("Fetching live NSE prices..."):
+            result = update_companies_json()
+        st.session_state["data_version"] = st.session_state.get("data_version", 0) + 1
+        if result.ok:
+            st.success(result.message)
+        else:
+            st.error(result.message)
+        st.rerun()
+
+
 def render_price_updates(df: pd.DataFrame) -> None:
     st.subheader("💹 Update current market price per share")
     st.caption(
@@ -369,8 +403,9 @@ def main() -> None:
         "returns, and current market price per share — with an AI assistant to ask about it."
     )
     st.warning(
-        "⚠️ **Sample/illustrative data only** — figures below are placeholder demo data, "
-        "not live market data, and nothing on this page is financial advice.",
+        "⚠️ Market prices can be refreshed from a free public NSE data source (see the "
+        "**Update Market Prices** tab), but historical return figures remain illustrative "
+        "demo data. Nothing on this page is financial advice.",
         icon="⚠️",
     )
 
@@ -389,6 +424,8 @@ def main() -> None:
         filtered = render_companies(df)
 
     with tab_prices:
+        render_live_refresh(raw)
+        st.divider()
         render_price_updates(df)
 
     with tab_assets:
