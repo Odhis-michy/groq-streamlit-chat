@@ -322,6 +322,104 @@ def render_live_refresh(raw: dict) -> None:
         st.rerun()
 
 
+def render_trading(df: pd.DataFrame) -> None:
+    from data.portfolio import buy, holdings_market_value, load_portfolio, reset_portfolio, sell
+
+    portfolio = load_portfolio()
+    price_by_company = dict(zip(df["Company"], df[PRICE_COL]))
+
+    st.subheader("💼 Paper Trading Portfolio")
+    st.caption(
+        "Simulated trading only — no real money or real brokerage orders are involved. Buys "
+        "and sells are priced off the current **Market Price** column and tracked locally in "
+        "`data/portfolio.json`."
+    )
+
+    holdings_value = holdings_market_value(portfolio, price_by_company)
+    total_value = portfolio["cash"] + holdings_value
+    pnl = total_value - portfolio["startingCash"]
+    pnl_pct = (pnl / portfolio["startingCash"] * 100) if portfolio["startingCash"] else 0.0
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Cash (KES)", f"{portfolio['cash']:,.2f}")
+    c2.metric("Holdings value (KES)", f"{holdings_value:,.2f}")
+    c3.metric("Total portfolio (KES)", f"{total_value:,.2f}")
+    c4.metric("Total P&L (KES)", f"{pnl:,.2f}", f"{pnl_pct:+.2f}%")
+
+    buy_col, sell_col = st.columns(2)
+
+    with buy_col:
+        st.markdown("**Buy shares**")
+        company = st.selectbox("Company", df["Company"], key="buy_company")
+        price = float(price_by_company[company])
+        st.caption(f"Current price: KES {price:,.2f}/share")
+        shares = st.number_input("Shares to buy", min_value=1, step=1, key="buy_shares")
+        st.caption(f"Estimated cost: KES {shares * price:,.2f}")
+        if st.button("🟢 Buy", key="buy_btn"):
+            result = buy(portfolio, company, float(shares), price)
+            (st.success if result.ok else st.error)(result.message)
+            if result.ok:
+                st.rerun()
+
+    with sell_col:
+        st.markdown("**Sell shares**")
+        held = {h["company"]: h["shares"] for h in portfolio["holdings"]}
+        if not held:
+            st.info("You have no holdings to sell yet.")
+        else:
+            company_s = st.selectbox("Company", list(held.keys()), key="sell_company")
+            held_shares = held[company_s]
+            price_s = float(price_by_company.get(company_s, 0.0))
+            st.caption(f"You hold {held_shares:g} share(s) — current price: KES {price_s:,.2f}/share")
+            shares_s = st.number_input(
+                "Shares to sell", min_value=1, max_value=int(held_shares), step=1, key="sell_shares"
+            )
+            st.caption(f"Estimated proceeds: KES {shares_s * price_s:,.2f}")
+            if st.button("🔴 Sell", key="sell_btn"):
+                result = sell(portfolio, company_s, float(shares_s), price_s)
+                (st.success if result.ok else st.error)(result.message)
+                if result.ok:
+                    st.rerun()
+
+    st.divider()
+    st.markdown("**Current holdings**")
+    if portfolio["holdings"]:
+        rows = []
+        for h in portfolio["holdings"]:
+            cur_price = float(price_by_company.get(h["company"], h["avgCost"]))
+            market_value = h["shares"] * cur_price
+            cost_basis = h["shares"] * h["avgCost"]
+            unrealized = market_value - cost_basis
+            unrealized_pct = (unrealized / cost_basis * 100) if cost_basis else 0.0
+            rows.append(
+                {
+                    "Company": h["company"],
+                    "Shares": h["shares"],
+                    "Avg Cost (KES)": round(h["avgCost"], 2),
+                    "Current Price (KES)": round(cur_price, 2),
+                    "Market Value (KES)": round(market_value, 2),
+                    "Unrealized P&L (KES)": round(unrealized, 2),
+                    "Unrealized P&L %": round(unrealized_pct, 2),
+                }
+            )
+        st.dataframe(pd.DataFrame(rows).set_index("Company"), use_container_width=True)
+    else:
+        st.caption("No holdings yet — place a buy order above to get started.")
+
+    st.markdown("**Trade history**")
+    if portfolio["trades"]:
+        st.dataframe(pd.DataFrame(list(reversed(portfolio["trades"]))), use_container_width=True, hide_index=True)
+    else:
+        st.caption("No trades yet.")
+
+    with st.expander("⚠️ Reset portfolio"):
+        st.caption("Wipes cash, holdings, and trade history back to the starting balance. Cannot be undone.")
+        if st.button("Reset portfolio to starting cash", key="reset_portfolio_btn"):
+            reset_portfolio()
+            st.success("Portfolio reset.")
+            st.rerun()
+
+
 def render_price_updates(df: pd.DataFrame) -> None:
     st.subheader("💹 Update current market price per share")
     st.caption(
@@ -413,8 +511,15 @@ def main() -> None:
     df = load_data(version)
     raw = load_raw()
 
-    tab_overview, tab_companies, tab_prices, tab_assets, tab_chat = st.tabs(
-        ["🏠 Overview", "📊 Companies & Sectors", "💹 Update Market Prices", "🎓 Asset Classes", "🤖 Ask AI"]
+    tab_overview, tab_companies, tab_trade, tab_prices, tab_assets, tab_chat = st.tabs(
+        [
+            "🏠 Overview",
+            "📊 Companies & Sectors",
+            "💼 Trade / Portfolio",
+            "💹 Update Market Prices",
+            "🎓 Asset Classes",
+            "🤖 Ask AI",
+        ]
     )
 
     with tab_overview:
@@ -422,6 +527,9 @@ def main() -> None:
 
     with tab_companies:
         filtered = render_companies(df)
+
+    with tab_trade:
+        render_trading(df)
 
     with tab_prices:
         render_live_refresh(raw)
