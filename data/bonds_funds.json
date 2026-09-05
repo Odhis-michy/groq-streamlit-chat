@@ -1,0 +1,26 @@
+{
+  "governmentSecurities": [
+    {"Instrument": "91-Day Treasury Bill", "Type": "T-Bill", "Tenor": "91 days", "Indicative Rate (%)": 15.8, "Issuer": "Central Bank of Kenya"},
+    {"Instrument": "182-Day Treasury Bill", "Type": "T-Bill", "Tenor": "182 days", "Indicative Rate (%)": 16.4, "Issuer": "Central Bank of Kenya"},
+    {"Instrument": "364-Day Treasury Bill", "Type": "T-Bill", "Tenor": "364 days", "Indicative Rate (%)": 16.9, "Issuer": "Central Bank of Kenya"},
+    {"Instrument": "FXD1/2024/5Yr", "Type": "Treasury Bond", "Tenor": "5 years", "Indicative Rate (%)": 17.2, "Issuer": "Central Bank of Kenya"},
+    {"Instrument": "FXD1/2023/10Yr", "Type": "Treasury Bond", "Tenor": "10 years", "Indicative Rate (%)": 17.8, "Issuer": "Central Bank of Kenya"},
+    {"Instrument": "IFB1/2022/15Yr", "Type": "Infrastructure Bond", "Tenor": "15 years", "Indicative Rate (%)": 18.3, "Issuer": "Central Bank of Kenya"}
+  ],
+  "corporateBonds": [
+    {"Issuer": "East African Breweries PLC", "Instrument": "EABL Corporate Note", "Tenor": "5 years", "Indicative Coupon (%)": 13.5},
+    {"Issuer": "Family Bank", "Instrument": "Family Bank Medium-Term Note", "Tenor": "6 years", "Indicative Coupon (%)": 14.0},
+    {"Issuer": "Centum Investment", "Instrument": "Centum Corporate Bond", "Tenor": "5 years", "Indicative Coupon (%)": 13.8}
+  ],
+  "moneyMarketFunds": [
+    {"Fund Manager": "CIC Money Market Fund", "Type": "Money Market Fund", "Indicative Annual Yield (%)": 15.5, "Minimum Investment (KES)": 1000},
+    {"Fund Manager": "Sanlam Money Market Fund", "Type": "Money Market Fund", "Indicative Annual Yield (%)": 15.2, "Minimum Investment (KES)": 2500},
+    {"Fund Manager": "NCBA Money Market Fund", "Type": "Money Market Fund", "Indicative Annual Yield (%)": 15.7, "Minimum Investment (KES)": 5000},
+    {"Fund Manager": "Britam Money Market Fund", "Type": "Money Market Fund", "Indicative Annual Yield (%)": 15.4, "Minimum Investment (KES)": 1000}
+  ],
+  "unitTrusts": [
+    {"Fund Manager": "Old Mutual Balanced Fund", "Type": "Balanced Unit Trust", "Indicative 1Yr Return (%)": 11.2, "Minimum Investment (KES)": 5000},
+    {"Fund Manager": "ICEA LION Equity Fund", "Type": "Equity Unit Trust", "Indicative 1Yr Return (%)": 14.6, "Minimum Investment (KES)": 5000},
+    {"Fund Manager": "GenAfrica Bond Fund", "Type": "Fixed Income Unit Trust", "Indicative 1Yr Return (%)": 13.1, "Minimum Investment (KES)": 2500}
+  ]
+}

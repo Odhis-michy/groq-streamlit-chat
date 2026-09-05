@@ -7,3 +7,4 @@ venv/
 streamlit.log
 streamlit.err.log
 data/portfolio.json
+data/watchlist.json

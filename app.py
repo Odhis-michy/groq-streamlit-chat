@@ -323,7 +323,15 @@ def render_live_refresh(raw: dict) -> None:
 
 
 def render_trading(df: pd.DataFrame) -> None:
-    from data.portfolio import buy, holdings_market_value, load_portfolio, reset_portfolio, sell
+    from data.portfolio import (
+        buy,
+        deposit,
+        holdings_market_value,
+        load_portfolio,
+        reset_portfolio,
+        sell,
+        withdraw,
+    )
 
     portfolio = load_portfolio()
     price_by_company = dict(zip(df["Company"], df[PRICE_COL]))
@@ -337,8 +345,9 @@ def render_trading(df: pd.DataFrame) -> None:
 
     holdings_value = holdings_market_value(portfolio, price_by_company)
     total_value = portfolio["cash"] + holdings_value
-    pnl = total_value - portfolio["startingCash"]
-    pnl_pct = (pnl / portfolio["startingCash"] * 100) if portfolio["startingCash"] else 0.0
+    baseline = portfolio["startingCash"] + portfolio.get("netDeposits", 0.0)
+    pnl = total_value - baseline
+    pnl_pct = (pnl / baseline * 100) if baseline else 0.0
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Cash (KES)", f"{portfolio['cash']:,.2f}")
@@ -382,27 +391,46 @@ def render_trading(df: pd.DataFrame) -> None:
                     st.rerun()
 
     st.divider()
+    st.markdown("**Cash management (deposit / withdraw)**")
+    st.caption("Simulates moving cash in or out of your virtual brokerage account.")
+    dep_col, wd_col = st.columns(2)
+    with dep_col:
+        dep_amount = st.number_input("Deposit amount (KES)", min_value=0.0, step=1000.0, key="deposit_amount")
+        if st.button("⬆️ Deposit", key="deposit_btn"):
+            result = deposit(portfolio, float(dep_amount))
+            (st.success if result.ok else st.error)(result.message)
+            if result.ok:
+                st.rerun()
+    with wd_col:
+        wd_amount = st.number_input("Withdraw amount (KES)", min_value=0.0, step=1000.0, key="withdraw_amount")
+        if st.button("⬇️ Withdraw", key="withdraw_btn"):
+            result = withdraw(portfolio, float(wd_amount))
+            (st.success if result.ok else st.error)(result.message)
+            if result.ok:
+                st.rerun()
+
+    st.divider()
     st.markdown("**Current holdings**")
-    if portfolio["holdings"]:
-        rows = []
-        for h in portfolio["holdings"]:
-            cur_price = float(price_by_company.get(h["company"], h["avgCost"]))
-            market_value = h["shares"] * cur_price
-            cost_basis = h["shares"] * h["avgCost"]
-            unrealized = market_value - cost_basis
-            unrealized_pct = (unrealized / cost_basis * 100) if cost_basis else 0.0
-            rows.append(
-                {
-                    "Company": h["company"],
-                    "Shares": h["shares"],
-                    "Avg Cost (KES)": round(h["avgCost"], 2),
-                    "Current Price (KES)": round(cur_price, 2),
-                    "Market Value (KES)": round(market_value, 2),
-                    "Unrealized P&L (KES)": round(unrealized, 2),
-                    "Unrealized P&L %": round(unrealized_pct, 2),
-                }
-            )
-        st.dataframe(pd.DataFrame(rows).set_index("Company"), use_container_width=True)
+    holdings_rows = []
+    for h in portfolio["holdings"]:
+        cur_price = float(price_by_company.get(h["company"], h["avgCost"]))
+        market_value = h["shares"] * cur_price
+        cost_basis = h["shares"] * h["avgCost"]
+        unrealized = market_value - cost_basis
+        unrealized_pct = (unrealized / cost_basis * 100) if cost_basis else 0.0
+        holdings_rows.append(
+            {
+                "Company": h["company"],
+                "Shares": h["shares"],
+                "Avg Cost (KES)": round(h["avgCost"], 2),
+                "Current Price (KES)": round(cur_price, 2),
+                "Market Value (KES)": round(market_value, 2),
+                "Unrealized P&L (KES)": round(unrealized, 2),
+                "Unrealized P&L %": round(unrealized_pct, 2),
+            }
+        )
+    if holdings_rows:
+        st.dataframe(pd.DataFrame(holdings_rows).set_index("Company"), use_container_width=True)
     else:
         st.caption("No holdings yet — place a buy order above to get started.")
 
@@ -412,12 +440,185 @@ def render_trading(df: pd.DataFrame) -> None:
     else:
         st.caption("No trades yet.")
 
+    st.divider()
+    st.markdown("**📄 Portfolio statement**")
+    st.caption("Download your current holdings and full trade/cash history as CSV.")
+    s1, s2 = st.columns(2)
+    with s1:
+        holdings_csv = pd.DataFrame(holdings_rows).to_csv(index=False) if holdings_rows else ""
+        st.download_button(
+            "⬇️ Download holdings (CSV)",
+            data=holdings_csv,
+            file_name="holdings_statement.csv",
+            mime="text/csv",
+            disabled=not holdings_rows,
+        )
+    with s2:
+        trades_csv = (
+            pd.DataFrame(list(reversed(portfolio["trades"]))).to_csv(index=False) if portfolio["trades"] else ""
+        )
+        st.download_button(
+            "⬇️ Download trade history (CSV)",
+            data=trades_csv,
+            file_name="trade_history_statement.csv",
+            mime="text/csv",
+            disabled=not portfolio["trades"],
+        )
+
     with st.expander("⚠️ Reset portfolio"):
         st.caption("Wipes cash, holdings, and trade history back to the starting balance. Cannot be undone.")
         if st.button("Reset portfolio to starting cash", key="reset_portfolio_btn"):
             reset_portfolio()
             st.success("Portfolio reset.")
             st.rerun()
+
+
+def render_watchlist(df: pd.DataFrame) -> None:
+    from data.watchlist import (
+        add_company,
+        check_alerts,
+        load_watchlist,
+        remove_alert,
+        remove_company,
+        set_alert,
+    )
+
+    wl = load_watchlist()
+    price_by_company = dict(zip(df["Company"], df[PRICE_COL]))
+
+    st.subheader("⭐ Watchlist & price alerts")
+    st.caption(
+        "Track companies you're interested in and set a target price alert — above or below "
+        "a threshold. Checked live against the current Market Price."
+    )
+
+    for t in check_alerts(wl, price_by_company):
+        arrow = "risen above" if t["direction"] == "above" else "fallen below"
+        st.warning(
+            f"🔔 **{t['company']}** has {arrow} your target of KES {t['target']:,.2f} — "
+            f"current price KES {t['current']:,.2f}.",
+            icon="🔔",
+        )
+
+    available = [c for c in df["Company"] if c not in wl["watching"]]
+    if available:
+        add_col1, add_col2 = st.columns([3, 1])
+        new_company = add_col1.selectbox("Add company to watchlist", available, key="watch_add")
+        add_col2.write("")
+        add_col2.write("")
+        if add_col2.button("➕ Add"):
+            add_company(wl, new_company)
+            st.rerun()
+    else:
+        st.caption("All companies are already on your watchlist.")
+
+    st.divider()
+
+    if not wl["watching"]:
+        st.info("Your watchlist is empty — add a company above to get started.")
+        return
+
+    alerts_by_company = {a["company"]: a for a in wl["alerts"]}
+    for company in wl["watching"]:
+        price = price_by_company.get(company)
+        label = f"{company} — KES {price:,.2f}" if price is not None else company
+        with st.expander(label):
+            existing = alerts_by_company.get(company)
+            c1, c2, c3 = st.columns([2, 2, 1])
+            direction = c1.selectbox(
+                "Alert when price is",
+                ["above", "below"],
+                index=0 if not existing or existing["direction"] == "above" else 1,
+                key=f"dir_{company}",
+            )
+            target = c2.number_input(
+                "Target price (KES)",
+                min_value=0.0,
+                value=float(existing["target"]) if existing else float(price or 0.0),
+                step=0.5,
+                key=f"target_{company}",
+            )
+            with c3:
+                st.write("")
+                st.write("")
+                if st.button("💾 Save alert", key=f"save_{company}"):
+                    set_alert(wl, company, target, direction)
+                    st.rerun()
+            b1, b2 = st.columns(2)
+            if existing and b1.button("🗑️ Remove alert", key=f"rm_alert_{company}"):
+                remove_alert(wl, company)
+                st.rerun()
+            if b2.button("❌ Remove from watchlist", key=f"rm_watch_{company}"):
+                remove_company(wl, company)
+                st.rerun()
+
+
+def load_news() -> list[dict]:
+    path = Path(__file__).parent / "data" / "news.json"
+    return json.loads(path.read_text())["items"]
+
+
+def render_news() -> None:
+    st.subheader("📰 Research & market news")
+    st.caption(
+        "Curated sample research notes and market commentary for this demo — not a live news "
+        "feed, and not financial advice."
+    )
+    items = load_news()
+    sectors = sorted({item["sector"] for item in items})
+    selected = st.multiselect("Filter by sector", sectors, default=sectors, key="news_sector_filter")
+    filtered = sorted(
+        (item for item in items if item["sector"] in selected),
+        key=lambda x: x["date"],
+        reverse=True,
+    )
+    if not filtered:
+        st.info("No news items match the selected sectors.")
+    for item in filtered:
+        with st.container(border=True):
+            st.markdown(f"**{item['title']}**")
+            st.caption(f"{item['date']} · {item['sector']} · {item['source']}")
+            st.write(item["summary"])
+
+
+def load_bonds_funds() -> dict:
+    path = Path(__file__).parent / "data" / "bonds_funds.json"
+    return json.loads(path.read_text())
+
+
+def render_bonds_funds() -> None:
+    data = load_bonds_funds()
+    st.subheader("🏛️ Bonds, T-Bills & Funds")
+    st.caption(
+        "Illustrative sample rates for fixed-income and pooled-fund instruments available in "
+        "Kenya — not live rates, not financial advice."
+    )
+
+    st.markdown("**Government securities (Treasury Bills & Bonds)**")
+    st.dataframe(pd.DataFrame(data["governmentSecurities"]), use_container_width=True, hide_index=True)
+
+    st.markdown("**Corporate bonds**")
+    st.dataframe(pd.DataFrame(data["corporateBonds"]), use_container_width=True, hide_index=True)
+
+    st.markdown("**Money market funds**")
+    st.dataframe(pd.DataFrame(data["moneyMarketFunds"]), use_container_width=True, hide_index=True)
+
+    st.markdown("**Unit trusts / collective investment schemes**")
+    st.dataframe(pd.DataFrame(data["unitTrusts"]), use_container_width=True, hide_index=True)
+
+
+def load_ipo_calendar() -> list[dict]:
+    path = Path(__file__).parent / "data" / "ipo_calendar.json"
+    return json.loads(path.read_text())["events"]
+
+
+def render_ipo_calendar() -> None:
+    st.subheader("🗓️ IPO & Rights Issue calendar")
+    st.caption("Illustrative sample calendar of primary-market events — not a live feed, not financial advice.")
+    events = load_ipo_calendar()
+    status_order = {"Ongoing": 0, "Upcoming": 1, "Closed": 2}
+    events = sorted(events, key=lambda e: (status_order.get(e["Status"], 9), e["openDate"]))
+    st.dataframe(pd.DataFrame(events), use_container_width=True, hide_index=True)
 
 
 def render_price_updates(df: pd.DataFrame) -> None:
@@ -511,11 +712,26 @@ def main() -> None:
     df = load_data(version)
     raw = load_raw()
 
-    tab_overview, tab_companies, tab_trade, tab_prices, tab_assets, tab_chat = st.tabs(
+    (
+        tab_overview,
+        tab_companies,
+        tab_watchlist,
+        tab_trade,
+        tab_bonds,
+        tab_ipo,
+        tab_news,
+        tab_prices,
+        tab_assets,
+        tab_chat,
+    ) = st.tabs(
         [
             "🏠 Overview",
             "📊 Companies & Sectors",
+            "⭐ Watchlist",
             "💼 Trade / Portfolio",
+            "🏛️ Bonds & Funds",
+            "🗓️ IPO Calendar",
+            "📰 Research & News",
             "💹 Update Market Prices",
             "🎓 Asset Classes",
             "🤖 Ask AI",
@@ -528,8 +744,20 @@ def main() -> None:
     with tab_companies:
         filtered = render_companies(df)
 
+    with tab_watchlist:
+        render_watchlist(df)
+
     with tab_trade:
         render_trading(df)
+
+    with tab_bonds:
+        render_bonds_funds()
+
+    with tab_ipo:
+        render_ipo_calendar()
+
+    with tab_news:
+        render_news()
 
     with tab_prices:
         render_live_refresh(raw)

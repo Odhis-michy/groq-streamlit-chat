@@ -1,0 +1,49 @@
+{
+  "events": [
+    {
+      "Company": "Kenya Mortgage Refinance Co. Bond",
+      "Type": "Bond Issue",
+      "Status": "Upcoming",
+      "openDate": "2026-09-15",
+      "closeDate": "2026-09-29",
+      "Price Range": "KES 1,000 per unit",
+      "Notes": "Illustrative sample listing — infrastructure bond to support affordable housing mortgage refinancing."
+    },
+    {
+      "Company": "Craft Silicon Ltd",
+      "Type": "IPO",
+      "Status": "Upcoming",
+      "openDate": "2026-10-06",
+      "closeDate": "2026-10-24",
+      "Price Range": "KES 18 - 22",
+      "Notes": "Illustrative sample listing — fintech software provider planned NSE main board listing."
+    },
+    {
+      "Company": "Bamburi Cement PLC",
+      "Type": "Rights Issue",
+      "Status": "Ongoing",
+      "openDate": "2026-08-25",
+      "closeDate": "2026-09-19",
+      "Price Range": "KES 42 per share",
+      "Notes": "Illustrative sample listing — rights issue to fund plant capacity expansion."
+    },
+    {
+      "Company": "I&M Group PLC",
+      "Type": "Rights Issue",
+      "Status": "Closed",
+      "openDate": "2026-06-02",
+      "closeDate": "2026-06-27",
+      "Price Range": "KES 24 per share",
+      "Notes": "Illustrative sample listing — closed rights issue, fully subscribed."
+    },
+    {
+      "Company": "Kenya Airways PLC",
+      "Type": "Rights Issue",
+      "Status": "Closed",
+      "openDate": "2026-04-14",
+      "closeDate": "2026-05-09",
+      "Price Range": "KES 3.50 per share",
+      "Notes": "Illustrative sample listing — closed rights issue linked to balance-sheet restructuring."
+    }
+  ]
+}

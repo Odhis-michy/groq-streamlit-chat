@@ -21,7 +21,13 @@ STARTING_CASH = 1_000_000.0  # KES — arbitrary virtual starting balance
 
 
 def _default_portfolio() -> dict:
-    return {"startingCash": STARTING_CASH, "cash": STARTING_CASH, "holdings": [], "trades": []}
+    return {
+        "startingCash": STARTING_CASH,
+        "cash": STARTING_CASH,
+        "netDeposits": 0.0,
+        "holdings": [],
+        "trades": [],
+    }
 
 
 def load_portfolio() -> dict:
@@ -29,7 +35,11 @@ def load_portfolio() -> dict:
         portfolio = _default_portfolio()
         save_portfolio(portfolio)
         return portfolio
-    return json.loads(PORTFOLIO_PATH.read_text())
+    portfolio = json.loads(PORTFOLIO_PATH.read_text())
+    if "netDeposits" not in portfolio:
+        portfolio["netDeposits"] = 0.0
+        save_portfolio(portfolio)
+    return portfolio
 
 
 def save_portfolio(portfolio: dict) -> None:
@@ -93,6 +103,28 @@ def sell(portfolio: dict, company: str, shares: float, price: float) -> TradeRes
     _log_trade(portfolio, company, "SELL", shares, price, proceeds)
     save_portfolio(portfolio)
     return TradeResult(True, f"Sold {shares:g} share(s) of {company} at KES {price:,.2f} for KES {proceeds:,.2f}.")
+
+
+def deposit(portfolio: dict, amount: float) -> TradeResult:
+    if amount <= 0:
+        return TradeResult(False, "Deposit amount must be greater than zero.")
+    portfolio["cash"] += amount
+    portfolio["netDeposits"] = portfolio.get("netDeposits", 0.0) + amount
+    _log_trade(portfolio, "CASH", "DEPOSIT", 0.0, 0.0, amount)
+    save_portfolio(portfolio)
+    return TradeResult(True, f"Deposited KES {amount:,.2f}.")
+
+
+def withdraw(portfolio: dict, amount: float) -> TradeResult:
+    if amount <= 0:
+        return TradeResult(False, "Withdrawal amount must be greater than zero.")
+    if amount > portfolio["cash"]:
+        return TradeResult(False, f"Insufficient cash: have KES {portfolio['cash']:,.2f}.")
+    portfolio["cash"] -= amount
+    portfolio["netDeposits"] = portfolio.get("netDeposits", 0.0) - amount
+    _log_trade(portfolio, "CASH", "WITHDRAWAL", 0.0, 0.0, amount)
+    save_portfolio(portfolio)
+    return TradeResult(True, f"Withdrew KES {amount:,.2f}.")
 
 
 def _log_trade(portfolio: dict, company: str, action: str, shares: float, price: float, total: float) -> None:
